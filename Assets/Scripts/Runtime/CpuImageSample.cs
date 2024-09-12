@@ -170,6 +170,7 @@ namespace UnityEngine.XR.ARFoundation.Samples
             // it acquires a native resource that must be disposed (see below).
             if (!m_CameraManager.TryAcquireLatestCpuImage(out XRCpuImage image))
             {
+                Debug.Log("Failed to get camera image from ARCameraManager");
                 return;
             }
 
