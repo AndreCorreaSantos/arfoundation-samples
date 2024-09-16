@@ -12,13 +12,15 @@ public class ClientLogic : MonoBehaviour
     public RawImage depthImage;
     public Transform playerTransform;
     public GameObject UICanvas;
-    public GameObject anchorPrefab;   // Assign your anchor prefab in the Inspector
+    public GameObject anchorPrefab;
+
+    private GameObject uiCanvasInstance;
 
     private byte[] colorImageBytes;
     private byte[] depthImageBytes;
 
     private float timeSinceLastSend = 0f;
-    private float sendInterval = 0.5f; // Adjust as needed
+    private float sendInterval = 0.5f;
 
     private List<GameObject> anchors = new List<GameObject>();
 
@@ -27,7 +29,6 @@ public class ClientLogic : MonoBehaviour
         StartWebSocket();
         SpawnUI();
 
-        // Subscribe to server messages
         connection.OnServerMessage += HandleServerMessage;
     }
 
@@ -39,7 +40,6 @@ public class ClientLogic : MonoBehaviour
         {
             timeSinceLastSend = 0f;
 
-            // Perform image encoding on the main thread
             Texture2D colorTexture = ConvertToTexture2D(colorImage.texture);
             Texture2D depthTexture = ConvertToTexture2D(depthImage.texture);
 
@@ -53,47 +53,68 @@ public class ClientLogic : MonoBehaviour
                 depthImageBytes = depthTexture.EncodeToJPG();
             }
 
-            // Send data asynchronously
             SendDataAsync();
         }
 
-        // Remove destroyed anchors from the list
         anchors.RemoveAll(anchor => anchor == null);
     }
 
-    // Handle incoming messages from the server
     private void HandleServerMessage(string message)
     {
         Debug.Log("Received from server: " + message);
 
-        if (message.StartsWith("object_position"))
+        FrameDataMessage frameData = JsonUtility.FromJson<FrameDataMessage>(message);
+        if (frameData == null || frameData.type != "frame_data")
         {
-            string data = message.Replace("object_position", "").Trim();
-            string[] parts = data.Split(' ');
+            Debug.LogWarning("Invalid message received from server.");
+            return;
+        }
 
-            if (parts.Length == 3 &&
-                float.TryParse(parts[0], out float x) &&
-                float.TryParse(parts[1], out float y) &&
-                float.TryParse(parts[2], out float z))
+        // Handle GUI colors
+        if (frameData.gui_colors != null)
+        {
+            Color backgroundColor = new Color(
+                frameData.gui_colors.background_color.r / 255f,
+                frameData.gui_colors.background_color.g / 255f,
+                frameData.gui_colors.background_color.b / 255f
+            );
+            Color textColor = new Color(
+                frameData.gui_colors.text_color.r / 255f,
+                frameData.gui_colors.text_color.g / 255f,
+                frameData.gui_colors.text_color.b / 255f
+            );
+
+            setColors colorSetter = uiCanvasInstance.GetComponent<setColors>();
+            if (colorSetter != null)
             {
-                Vector3 objectPosition = new Vector3(x, y, z);
-
-                // Spawn the anchor at the received position
-                SpawnAnchor(objectPosition);
+                colorSetter.SetColor(backgroundColor, textColor);
             }
             else
             {
-                Debug.LogWarning("Invalid object position data received.");
+                Debug.LogWarning("setColors component not found on uiCanvasInstance");
             }
+        }
+
+        // Handle object position
+        if (frameData.object_position != null)
+        {
+            Vector3 objectPosition = new Vector3(
+                frameData.object_position.x,
+                frameData.object_position.y,
+                frameData.object_position.z
+            );
+            SpawnAnchor(objectPosition);
+        }
+        else
+        {
+            // No object detected in this frame; handle accordingly if needed
         }
     }
 
-    // Spawn the anchor in the scene
     private void SpawnAnchor(Vector3 position)
     {
         if (anchorPrefab != null)
         {
-            // Check for existing anchors within a 1.0 unit radius
             bool anchorNearby = false;
 
             foreach (GameObject anchor in anchors)
@@ -111,11 +132,9 @@ public class ClientLogic : MonoBehaviour
 
             if (!anchorNearby)
             {
-                // Instantiate the anchor
                 GameObject newAnchor = Instantiate(anchorPrefab, position, Quaternion.identity);
-                newAnchor.layer = 30; // COMMENT THIS IF NOT DEBUGGING
+                newAnchor.layer = 30;
 
-                // Set the playerTransform on the Anchor script
                 Anchor anchorScript = newAnchor.GetComponent<Anchor>();
                 if (anchorScript != null)
                 {
@@ -126,7 +145,6 @@ public class ClientLogic : MonoBehaviour
                     Debug.LogWarning("Anchor component not found on the instantiated prefab.");
                 }
 
-                // Add the new anchor to the list
                 anchors.Add(newAnchor);
             }
             else
@@ -140,7 +158,6 @@ public class ClientLogic : MonoBehaviour
         }
     }
 
-    // Async method to handle sending data
     private async void SendDataAsync()
     {
         if (colorImageBytes != null)
@@ -156,11 +173,9 @@ public class ClientLogic : MonoBehaviour
 
     private async Task SendImageDataAsync(string imageType, byte[] imageBytes)
     {
-        // Get the player's position and rotation at the time of sending
         Vector3 pos = playerTransform.position;
         Quaternion rot = playerTransform.rotation;
 
-        // Create the data object to serialize
         ImageDataMessage dataObject = new ImageDataMessage
         {
             type = imageType,
@@ -169,23 +184,18 @@ public class ClientLogic : MonoBehaviour
             imageData = System.Convert.ToBase64String(imageBytes)
         };
 
-        // Serialize the object to JSON using Unity's JsonUtility
         string jsonString = JsonUtility.ToJson(dataObject);
-
-        // Send the JSON string
         await connection.SendTextAsync(jsonString);
     }
 
-    // Spawn UI in front of the player
     private void SpawnUI()
     {
-        GameObject ui = Instantiate(UICanvas, playerTransform.position + playerTransform.forward * 2, playerTransform.rotation);
-        ui.transform.LookAt(playerTransform);
+        uiCanvasInstance = Instantiate(UICanvas, playerTransform.position + playerTransform.forward * 2, playerTransform.rotation);
+        uiCanvasInstance.transform.LookAt(playerTransform);
 
-        SetLayerRecursively(ui, 30);
+        SetLayerRecursively(uiCanvasInstance, 30);
     }
 
-    // Recursive method to set the layer for a GameObject and all its children
     private void SetLayerRecursively(GameObject obj, int layer)
     {
         obj.layer = layer;
@@ -223,14 +233,29 @@ public class ClientLogic : MonoBehaviour
     }
 }
 
-// Serializable classes for JSON serialization
+// Serializable classes for JSON deserialization
+
 [System.Serializable]
-public class ImageDataMessage
+public class FrameDataMessage
 {
     public string type;
-    public PositionData position;
-    public RotationData rotation;
-    public string imageData;
+    public GuiColorsData gui_colors;
+    public PositionData object_position;
+}
+
+[System.Serializable]
+public class GuiColorsData
+{
+    public ColorData background_color;
+    public ColorData text_color;
+}
+
+[System.Serializable]
+public class ColorData
+{
+    public int r;
+    public int g;
+    public int b;
 }
 
 [System.Serializable]
@@ -248,4 +273,13 @@ public class RotationData
     public float y;
     public float z;
     public float w;
+}
+
+[System.Serializable]
+public class ImageDataMessage
+{
+    public string type;
+    public PositionData position;
+    public RotationData rotation;
+    public string imageData;
 }
