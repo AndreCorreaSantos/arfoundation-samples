@@ -1,7 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Threading.Tasks;
-using System.Text;
 using System.Collections.Generic;
 
 public class ClientLogic : MonoBehaviour
@@ -161,17 +160,17 @@ public class ClientLogic : MonoBehaviour
         Vector3 pos = playerTransform.position;
         Quaternion rot = playerTransform.rotation;
 
-        // Create a data object to serialize
-        var dataObject = new
+        // Create the data object to serialize
+        ImageDataMessage dataObject = new ImageDataMessage
         {
             type = imageType,
-            position = new { x = pos.x, y = pos.y, z = pos.z },
-            rotation = new { x = rot.x, y = rot.y, z = rot.z, w = rot.w },
-            imageData = Convert.ToBase64String(imageBytes)
+            position = new PositionData { x = pos.x, y = pos.y, z = pos.z },
+            rotation = new RotationData { x = rot.x, y = rot.y, z = rot.z, w = rot.w },
+            imageData = System.Convert.ToBase64String(imageBytes)
         };
 
-        // Serialize the object to JSON
-        string jsonString = JsonSerializer.Serialize(dataObject);
+        // Serialize the object to JSON using Unity's JsonUtility
+        string jsonString = JsonUtility.ToJson(dataObject);
 
         // Send the JSON string
         await connection.SendTextAsync(jsonString);
@@ -222,4 +221,31 @@ public class ClientLogic : MonoBehaviour
         }
         return null;
     }
+}
+
+// Serializable classes for JSON serialization
+[System.Serializable]
+public class ImageDataMessage
+{
+    public string type;
+    public PositionData position;
+    public RotationData rotation;
+    public string imageData;
+}
+
+[System.Serializable]
+public class PositionData
+{
+    public float x;
+    public float y;
+    public float z;
+}
+
+[System.Serializable]
+public class RotationData
+{
+    public float x;
+    public float y;
+    public float z;
+    public float w;
 }
